@@ -1,0 +1,221 @@
+---
+title: "Coffee_PointCloud_Height"
+author: "Octávio Costa"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    theme: cerulean
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## 1. Configuração Inicial
+
+```{r carregar_bibliotecas}
+# ====================================================
+# 0️⃣ Pacotes necessários
+# ====================================================
+library(lidR)    
+library(ggplot2) 
+library(terra)   
+```
+
+## 2. Leitura e Visualização dos Dados
+
+```{r carregar_dados, message=FALSE, warning=FALSE}
+# ====================================================
+# 1️⃣ Leitura e verificação da nuvem de pontos
+# ====================================================
+las <- readLAS("C:/Users/octav/OneDrive/Octavio/Projetos/Cafe_Doutorado/2_remote_sensing/Las_Files/Carmo/cloud_merged_carmo_mask.las")
+
+# Verificação da integridade do LAS
+las_check(las)
+
+# Visualização inicial da nuvem de pontos
+plot(las, size = 2, bg = "white", axis = TRUE, legend = TRUE, title = "Nuvem de Pontos Original")
+
+```
+
+## 3. Classificação do Solo
+
+A primeira etapa do processamento é identificar quais pontos pertencem ao terreno.
+
+```{r classificar_solo}
+# ====================================================
+# 2️⃣ Classificação do solo
+# ====================================================
+
+# Classificar os pontos de solo usando o algoritmo CSF (Cloth Simulation Function)
+las <- classify_ground(las, algorithm = csf())
+
+# Visualizar a nuvem de pontos classificada
+plot(las, color = "Classification", size = 2, bg = "white", title = "Nuvem de Pontos Classificada")
+```
+
+## 4. Geração do Modelo Digital do Terreno (MDT)
+
+Com os pontos de solo classificados, podemos gerar uma superfície contínua que representa o terreno.
+
+```{r gerar_mdt}
+
+# ====================================================
+# 3️⃣ Geração do Modelo Digital do Terreno (MDT)
+# ====================================================
+
+# Criar o Modelo Digital do Terreno (MDT) usando os pontos de solo classificados
+dtm <- rasterize_terrain(las, 
+                         res = 0.1, 
+                         algorithm = tin())
+
+# Visualizar o MDT em 3D
+plot_dtm3d(dtm, 
+           bg = "white", 
+           title = "Modelo Digital do Terreno (MDT)")
+```
+
+## 5. Normalização da Nuvem de Pontos
+
+A normalização subtrai a altura do terreno (MDT) de cada ponto, resultando em alturas relativas ao solo. Isso é fundamental para criar o Modelo de Altura do Dossel.
+
+```{r normalizar_nuvem}
+# ====================================================
+# 4️⃣ Normalização da nuvem de pontos
+# ====================================================
+
+# Normalizar a nuvem de pontos subtraindo o MDT
+nlas <- normalize_height(las, dtm)
+
+# Verificar se a normalização funcionou
+hist(filter_ground(nlas)$Z, main = "Histograma de Altura dos Pontos de Solo Normalizados", xlab = "Altura (m)")
+
+# Visualizar a nuvem de pontos normalizada
+plot(nlas, 
+     size = 2, 
+     bg = "white", 
+     title = "Nuvem de Pontos Normalizada")
+```
+
+## 6. Geração dos Modelos de Superfície (MDS e CHM)
+
+Finalmente, com a nuvem normalizada, podemos gerar os modelos de dossel e superfície.
+
+```{r gerar_chm_mds}
+# ====================================================
+# 5️⃣ Geração do CHM e do DSM
+# ====================================================
+
+# O Modelo de Altura do Dossel (CHM) é criado a partir da nuvem NORMALIZADA..
+chm <- rasterize_canopy(nlas, 
+                        res = 0.1,
+                        algorithm = p2r(subcircle = 0.15))
+
+# O Modelo de Superfície Digital (MDS) é criado a partir da nuvem ORIGINAL.
+dsm <- rasterize_canopy(las, 
+                        res = 0.1, 
+                        algorithm = p2r(subcircle = 0.15))
+```
+
+## 7. Visualizar Modelos 2D
+
+```{r}
+# ====================================================
+# 6️⃣ Visualização 2D dos modelos
+# ====================================================
+
+# Definir uma paleta de cores para os modelos de altura
+col <- height.colors(50)
+
+# Plotar o Modelo de Altura do Dossel (CHM)
+plot(chm, main = "Modelo de Altura do Dossel (CHM)")
+
+# Plotar o Modelo Digital de Terreno (MDT)
+plot(dtm, main = "Modelo Digital do Terreno (MDT)")
+
+# Plotar o Modelo de Superfície Digital (MDS)
+plot(dsm, main = "Modelo de Superfície Digital (MDS)")
+```
+
+## 8. Visualizar Modelos 3D
+
+```{r}
+# ====================================================
+# 7️⃣ Visualização 3D dos modelos
+# ====================================================
+
+# Visualizar o Modelo Digital do Terreno (MDT) em 3D
+plot_dtm3d(dtm, bg = "white", title = "Modelo Digital do Terreno (MDT) - 3D")
+
+# Visualizar o Modelo de Superfície Digital (MDS) em 3D
+plot_dtm3d(dsm, bg = "white", title = "Modelo de Superfície Digital (MDS) - 3D")
+
+# Visualizar o Modelo de Altura do Dossel (CHM) em 3D
+plot_dtm3d(chm, bg = "white", title = "Modelo de Altura do Dossel (CHM) - 3D")
+
+```
+
+## 9. Salvar modelos
+
+```{r}
+# ====================================================
+# 8️⃣ Salvar modelos em GeoTIFF
+# ====================================================
+
+# Salvar o MDT como um arquivo GeoTIFF
+writeRaster(dtm, "MDT_Roque_L1.tif", overwrite = TRUE)
+
+# Salvar o MDS como um arquivo GeoTIFF
+writeRaster(dsm, "MDS_Roque_L1.tif", overwrite = TRUE)
+
+# Salvar o CHM como um arquivo GeoTIFF
+writeRaster(chm, "CHM_Carmo_L1.tif", overwrite = TRUE)
+```
+
+```{r}
+# ====================================================
+# 9️⃣ Estatística zonal a partir de pontos GPS
+# ====================================================
+library(terra)
+library(sf)
+
+# Carregar pontos GPS (se ainda não estiverem carregados)
+gps <- st_read("C:/Users/octav/OneDrive/Octavio/Projetos/Cafe_Doutorado/1_design_shapefiles/Altura_CHM/Mavic/Pts_Alt_MV.shp")
+
+# Filtrar as plantas desejadas (exemplo: cid == "roque")
+gps_filtrado <- gps %>% filter(cid == "roque")
+
+# Criar buffer ao redor dos pontos (ex: 1 m de raio)
+gps_buffers <- st_buffer(gps_filtrado, dist = 1)  # ajustar dist conforme necessidade
+
+# Transformar para objeto terra (vect) compatível com rasters
+gps_vect <- vect(gps_buffers)
+
+# Carregar raster do CHM (ou DSM, MDT, conforme desejado)
+chm_raster <- rast("CHM_Roque_MS.tif")
+
+# Extrair estatísticas zonais
+stats <- extract(chm_raster, gps_vect, fun = function(x){
+  c(mean = mean(x, na.rm = TRUE),
+    median = median(x, na.rm = TRUE),
+    max = max(x, na.rm = TRUE))
+})
+
+# Combinar resultados com IDs dos pontos
+results <- cbind(gps_filtrado$id, stats[, -1])
+colnames(results)[1] <- "id"
+
+# Visualizar resultados
+head(results)
+```
+
+```{r}
+# ====================================================
+# 10️⃣ Salvar resultados em CSV
+# ====================================================
+write.csv(results, "CHM_Estatisticas_Zonais.csv", row.names = FALSE)
+
+```
+
